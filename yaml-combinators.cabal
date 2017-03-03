@@ -14,7 +14,7 @@ copyright:           (c) 2015 Signal Vine, LLC
                      (c) 2017 Roman Cheplyaka
 category:            Text
 build-type:          Simple
-extra-source-files:  ChangeLog.md
+extra-source-files:  ChangeLog.md, README.md
 cabal-version:       >=1.10
 
 library

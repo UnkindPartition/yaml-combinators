@@ -17,15 +17,15 @@ module Data.Yaml.Combinators
   , bool
   -- * Arrays
   , array
+  , theArray
   , ElementParser
   , element
-  , theArray
   -- * Objects
+  , object
   , FieldParser
   , field
   , optField
   , theField
-  , object
   -- * Errors
   , ParseError(..)
   , Reason(..)
@@ -51,6 +51,10 @@ import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HM
 import Generics.SOP
 import Generics.SOP.TH
+
+-- $setup
+-- >>> :set -XOverloadedStrings -XTypeApplications
+-- >>> import Data.Monoid
 
 deriveGeneric ''Value
 
@@ -107,9 +111,9 @@ ppParseError (ParseError _lvl reason) =
     UnexpectedAsPartOf part whole ->
       "Unexpected \n\n" ++ showYaml part ++ "\nas part of\n\n" ++ showYaml whole
     ExpectedInsteadOf exp1 got ->
-      "Expected " ++ exp1 ++ " instead of\n\n" ++ showYaml got
+      "Expected " ++ exp1 ++ " instead of:\n\n" ++ showYaml got
     ExpectedAsPartOf exp1 got ->
-      "Expected " ++ exp1 ++ " as part of\n\n" ++ showYaml got
+      "Expected " ++ exp1 ++ " as part of:\n\n" ++ showYaml got
   where
     showYaml :: Value -> String
     showYaml = BS8.unpack . encode
@@ -192,20 +196,33 @@ incErrLevel :: Either ParseError a -> Either ParseError a
 incErrLevel = first $ \(ParseError l r) -> ParseError (l+1) r
 
 -- | Match a single YAML string.
+--
+-- >>> parse string "howdy"
+-- Right "howdy"
 string :: Parser Text
 string = fromComponent $ S . S . Z $ ParserComponent $ Just $ \(I s :* Nil) -> Right s
 
 -- | Match a specific YAML string, usually a «tag» identifying a particular
 -- form of an array or object.
+--
+-- >>> parse (theString "hello") "hello"
+-- Right ()
+-- >>> either putStr print $ parse (theString "hello") "bye"
+-- Expected "hello" instead of:
+-- <BLANKLINE>
+-- bye
 theString :: Text -> Parser ()
 theString t = fromComponent $ S . S . Z $ ParserComponent $ Just $ \(I s :* Nil) ->
   if s == t
     then Right ()
     else Left $ ParseError 1 (ExpectedInsteadOf (show t) (String s))
 
--- | Match an 'Array' of elements, where each of elements are matched by
+-- | Match an array of elements, where each of elements are matched by
 -- the same parser. This is the function you'll use most of the time when
 -- parsing arrays, as they are usually homogeneous.
+--
+-- >>> parse (array string) "[a,b,c]"
+-- Right ["a","b","c"]
 array :: Parser a -> Parser (Vector a)
 array p = fromComponent $ S . Z $ ParserComponent $ Just $ \(I a :* Nil) -> incErrLevel $ mapM (runParser p) a
 
@@ -237,6 +254,9 @@ element p = ElementParser $ do
 -- | Match an array consisting of a fixed number of elements. The way each
 -- element is parsed depends on its position within the array and
 -- is determined by the 'ElementParser'.
+--
+-- >>> parse (theArray $ (,) <$> element string <*> element bool) "[f, true]"
+-- Right ("f",True)
 theArray :: ElementParser a -> Parser a
 theArray (ElementParser ep) = fromComponent $ S . Z $ ParserComponent $ Just $ \(I a :* Nil) -> incErrLevel $
   case runStateT ep (V.toList a) of
@@ -245,10 +265,16 @@ theArray (ElementParser ep) = fromComponent $ S . Z $ ParserComponent $ Just $ \
     Left errFn -> Left $ errFn a
 
 -- | Match a real number.
+--
+-- >>> parse number "3.14159"
+-- Right 3.14159
 number :: Parser Scientific
 number = fromComponent $ S . S . S . Z $ ParserComponent $ Just $ \(I n :* Nil) -> Right n
 
 -- | Match an integer.
+--
+-- >>> parse (integer @Int) "2017"
+-- Right 2017
 integer :: (Integral i, Bounded i) => Parser i
 integer = fromComponent $ S . S . S . Z $ ParserComponent $ Just $ \(I n :* Nil) ->
   case toBoundedInteger n of
@@ -256,6 +282,9 @@ integer = fromComponent $ S . S . S . Z $ ParserComponent $ Just $ \(I n :* Nil)
     Nothing -> Left $ ParseError 0 $ ExpectedInsteadOf "integer" (Number n)
 
 -- | Match a boolean.
+--
+-- >>> parse bool "yes"
+-- Right True
 bool :: Parser Bool
 bool = fromComponent $ S . S . S . S . Z $ ParserComponent $ Just $ \(I b :* Nil) -> Right b
 
@@ -300,6 +329,16 @@ optField name p = FieldParser $
 --
 -- This is a convenient wrapper around 'theString' intended for «tagging»
 -- objects.
+--
+-- >>> :{
+--     let p = object (Right <$ theField "type" "number" <*> field "value" number)
+--          <> object (Left  <$ theField "type" "string" <*> field "value" string)
+-- >>> :}
+--
+-- >>> parse p "{type: string, value: abc}"
+-- Right (Left "abc")
+-- >>> parse p "{type: number, value: 123}"
+-- Right (Right 123.0)
 theField
   :: Text -- ^ key name
   -> Text -- ^ expected value
@@ -308,6 +347,12 @@ theField key value = field key (theString value)
 
 -- | Match an object. Which set of keys to expect and how their values
 -- should be parsed is determined by the 'FieldParser'.
+--
+-- >>> let p = object $ (,) <$> field "name" string <*> optField "age" (integer @Int)
+-- >>> parse p "{ name: Anton, age: 2 }"
+-- Right ("Anton",Just 2)
+-- >>> parse p "name: Roma"
+-- Right ("Roma",Nothing)
 object :: FieldParser a -> Parser a
 object (FieldParser (Pair (ReaderT parseFn) (Constant names))) = fromComponent $ Z $ ParserComponent $ Just $ \(I o :* Nil) ->
   incErrLevel $

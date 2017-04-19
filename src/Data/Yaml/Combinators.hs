@@ -50,6 +50,7 @@ import Data.Functor.Constant
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HM
 import Generics.SOP
+import Generics.SOP.Classes
 import Generics.SOP.TH
 
 -- $setup
@@ -182,11 +183,7 @@ valueConNames =
 
 
 fromComponent :: forall a . NS (ParserComponent a) (Code Value) -> Parser a
-fromComponent parser = Parser $ hap' (hliftA (Fn . const) parser) (hpure mempty :: NP (ParserComponent a) (Code Value))
-
-hap' :: forall f (xs :: [k]) . NS (f -.-> f) xs -> NP f xs -> NP f xs
-hap' (Z (Fn f)) (h :* t) = f h :* t
-hap' (S f) (h :* t) = h :* hap' f t
+fromComponent parser = Parser $ hexpand mempty parser
 
 ----------------------------------------------------------------------
 --                           Combinators

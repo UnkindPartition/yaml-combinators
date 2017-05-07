@@ -52,6 +52,12 @@ tests = testGroup "Data.Yaml.Combinators"
   , testCase "Expect an object with opt field, field absent" $
       runParser (object $ optField "foo" number) (Object []) @?=
         Right Nothing
+  , testCase "Expect an object with default field, field present" $
+      runParser (object $ defaultField "foo" 7 number) (Object [("foo", Number 16309)]) @?=
+        Right 16309
+  , testCase "Expect an object with default field, field present" $
+      runParser (object $ defaultField "foo" 7 number) (Object []) @?=
+        Right 7
   , testCase "Expect an array of number and string, get it" $
       runParser
         (theArray $ (,) <$> element number <*> element string)

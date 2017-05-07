@@ -25,6 +25,7 @@ module Data.Yaml.Combinators
   , FieldParser
   , field
   , optField
+  , defaultField
   , theField
   -- * Errors
   , ParseError(..)
@@ -320,6 +321,15 @@ optField name p = FieldParser $
   Pair
     (ReaderT $ \o -> traverse (incErrLevel . runParser p) $ HM.lookup name o)
     (Constant $ HM.singleton name ())
+
+-- | Declare an optional object field with the given name and with a default
+-- to use if the field is absent.
+defaultField
+  :: Text -- ^ field name
+  -> a -- ^ default value
+  -> Parser a -- ^ value parser
+  -> FieldParser a
+defaultField name defaultVal p = fromMaybe defaultVal <$> optField name p
 
 -- | Require an object field with the given name and the given string value.
 --

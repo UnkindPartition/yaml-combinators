@@ -3,7 +3,7 @@
 -- Based on the article <https://ro-che.info/articles/2015-07-26-better-yaml-parsing Better Yaml Parsing>.
 {-# LANGUAGE PolyKinds, DataKinds, KindSignatures,
              ExplicitForAll, TemplateHaskell, ViewPatterns,
-             TypeOperators, TypeFamilies,
+             ScopedTypeVariables, TypeOperators, TypeFamilies,
              GeneralizedNewtypeDeriving #-}
 module Data.Yaml.Combinators
   ( Parser
@@ -25,10 +25,12 @@ module Data.Yaml.Combinators
   , FieldParser
   , field
   , optField
+  , defaultField
   , theField
   -- * Errors
   , ParseError(..)
   , Reason(..)
+  , validate
   ) where
 
 import Data.Aeson (Value(..), Object, Array)
@@ -123,7 +125,7 @@ ppParseError (ParseError _lvl reason) =
 --                           Core definitions
 ----------------------------------------------------------------------
 
-newtype ParserComponent a fs = ParserComponent (Maybe (NP I fs -> Either ParseError a))
+newtype ParserComponent a fs = ParserComponent (Maybe (Value -> NP I fs -> Either ParseError a))
 -- | A top-level YAML parser.
 --
 -- * Construct a 'Parser' with 'string', 'number', 'integer', 'bool', 'array', or 'object'.
@@ -137,7 +139,7 @@ newtype Parser a = Parser (NP (ParserComponent a) (Code Value))
 
 -- fmap for ParserComponent (in its first type argument)
 pcFmap :: (a -> b) -> ParserComponent a fs -> ParserComponent b fs
-pcFmap f (ParserComponent mbP) = ParserComponent $ (fmap . fmap . fmap $ f) mbP
+pcFmap f (ParserComponent mbP) = ParserComponent $ (fmap . fmap . fmap . fmap $ f) mbP
 
 instance Functor Parser where
   fmap f (Parser comps) = Parser $ hliftA (pcFmap f) comps
@@ -149,8 +151,8 @@ instance Monoid (ParserComponent a fs) where
       (Nothing, Nothing) -> Nothing
       (Just p1, Nothing) -> Just p1
       (Nothing, Just p2) -> Just p2
-      (Just p1, Just p2) -> Just $ \v ->
-        case (p1 v, p2 v) of
+      (Just p1, Just p2) -> Just $ \o v ->
+        case (p1 o v, p2 o v) of
           (Right r1, _) -> Right r1
           (_, Right r2) -> Right r2
           (Left l1, Left l2) -> Left $ mergeParseError l1 l2
@@ -168,7 +170,7 @@ runParser (Parser comps) orig@(from -> SOP v) =
     match (ParserComponent mbP) v1 = K $
       case mbP of
         Nothing -> Left $ ParseError 0 $ ExpectedInsteadOf expected orig
-        Just p -> p v1
+        Just p -> p orig v1
 
     expected =
       let
@@ -185,6 +187,20 @@ valueConNames =
 fromComponent :: forall a . NS (ParserComponent a) (Code Value) -> Parser a
 fromComponent parser = Parser $ hexpand mempty parser
 
+-- Wrap a parser with a decorator. The decorator has access to the parsed value as well
+-- as the original and can inject its own processing logic.
+decorate :: forall a b. Parser a -> (a -> Value -> Either ParseError b) -> Parser b
+decorate (Parser components) decorator = Parser $ hmap wrap components
+  where
+    wrap :: ParserComponent a fs -> ParserComponent b fs
+    wrap (ParserComponent maybeP) = ParserComponent $
+      case maybeP of
+        Nothing -> Nothing
+        Just p -> Just $ \orig val ->
+          case p orig val of
+            Left err     -> Left err
+            Right parsed -> decorator parsed orig
+
 ----------------------------------------------------------------------
 --                           Combinators
 ----------------------------------------------------------------------
@@ -197,7 +213,7 @@ incErrLevel = first $ \(ParseError l r) -> ParseError (l+1) r
 -- >>> parse string "howdy"
 -- Right "howdy"
 string :: Parser Text
-string = fromComponent $ S . S . Z $ ParserComponent $ Just $ \(I s :* Nil) -> Right s
+string = fromComponent $ S . S . Z $ ParserComponent $ Just $ const $ \(I s :* Nil) -> Right s
 
 -- | Match a specific YAML string, usually a «tag» identifying a particular
 -- form of an array or object.
@@ -209,7 +225,7 @@ string = fromComponent $ S . S . Z $ ParserComponent $ Just $ \(I s :* Nil) -> R
 -- <BLANKLINE>
 -- bye
 theString :: Text -> Parser ()
-theString t = fromComponent $ S . S . Z $ ParserComponent $ Just $ \(I s :* Nil) ->
+theString t = fromComponent $ S . S . Z $ ParserComponent $ Just $ const $ \(I s :* Nil) ->
   if s == t
     then Right ()
     else Left $ ParseError 1 (ExpectedInsteadOf (show t) (String s))
@@ -221,7 +237,7 @@ theString t = fromComponent $ S . S . Z $ ParserComponent $ Just $ \(I s :* Nil)
 -- >>> parse (array string) "[a,b,c]"
 -- Right ["a","b","c"]
 array :: Parser a -> Parser (Vector a)
-array p = fromComponent $ S . Z $ ParserComponent $ Just $ \(I a :* Nil) -> incErrLevel $ mapM (runParser p) a
+array p = fromComponent $ S . Z $ ParserComponent $ Just $ const $ \(I a :* Nil) -> incErrLevel $ mapM (runParser p) a
 
 -- | An 'ElementParser' describes how to parse a fixed-size array
 -- where each positional element has its own parser.
@@ -255,7 +271,7 @@ element p = ElementParser $ do
 -- >>> parse (theArray $ (,) <$> element string <*> element bool) "[f, true]"
 -- Right ("f",True)
 theArray :: ElementParser a -> Parser a
-theArray (ElementParser ep) = fromComponent $ S . Z $ ParserComponent $ Just $ \(I a :* Nil) -> incErrLevel $
+theArray (ElementParser ep) = fromComponent $ S . Z $ ParserComponent $ Just $ const $ \(I a :* Nil) -> incErrLevel $
   case runStateT ep (V.toList a) of
     Right (r, []) -> return r
     Right (_, v:_) -> Left $ ParseError 0 $ UnexpectedAsPartOf v $ Array a
@@ -266,14 +282,14 @@ theArray (ElementParser ep) = fromComponent $ S . Z $ ParserComponent $ Just $ \
 -- >>> parse number "3.14159"
 -- Right 3.14159
 number :: Parser Scientific
-number = fromComponent $ S . S . S . Z $ ParserComponent $ Just $ \(I n :* Nil) -> Right n
+number = fromComponent $ S . S . S . Z $ ParserComponent $ Just $ const $ \(I n :* Nil) -> Right n
 
 -- | Match an integer.
 --
 -- >>> parse (integer @Int) "2017"
 -- Right 2017
 integer :: (Integral i, Bounded i) => Parser i
-integer = fromComponent $ S . S . S . Z $ ParserComponent $ Just $ \(I n :* Nil) ->
+integer = fromComponent $ S . S . S . Z $ ParserComponent $ Just $ const $ \(I n :* Nil) ->
   case toBoundedInteger n of
     Just i -> Right i
     Nothing -> Left $ ParseError 0 $ ExpectedInsteadOf "integer" (Number n)
@@ -283,7 +299,19 @@ integer = fromComponent $ S . S . S . Z $ ParserComponent $ Just $ \(I n :* Nil)
 -- >>> parse bool "yes"
 -- Right True
 bool :: Parser Bool
-bool = fromComponent $ S . S . S . S . Z $ ParserComponent $ Just $ \(I b :* Nil) -> Right b
+bool = fromComponent $ S . S . S . S . Z $ ParserComponent $ Just $ const $ \(I b :* Nil) -> Right b
+
+-- | Make a parser match only valid values.
+--
+validate ::
+  Parser a -- ^ parser to wrap
+  -> (a -> Either String b) -- ^ validator
+  -> Parser b
+validate parser validator =
+  decorate parser (validity . validator)
+  where
+    validity (Right result) _    = Right result
+    validity (Left problem) orig = Left $ ParseError 1 $ ExpectedInsteadOf problem orig
 
 -- | A 'FieldParser' describes how to parse an object.
 --
@@ -322,6 +350,15 @@ optField name p = FieldParser $
     (ReaderT $ \o -> traverse (incErrLevel . runParser p) $ HM.lookup name o)
     (Constant $ HM.singleton name ())
 
+-- | Declare an optional object field with the given name and with a default
+-- to use if the field is absent.
+defaultField
+  :: Text -- ^ field name
+  -> a -- ^ default value
+  -> Parser a -- ^ value parser
+  -> FieldParser a
+defaultField name defaultVal p = fromMaybe defaultVal <$> optField name p
+
 -- | Require an object field with the given name and the given string value.
 --
 -- This is a convenient wrapper around 'theString' intended for «tagging»
@@ -351,7 +388,7 @@ theField key value = field key (theString value)
 -- >>> parse p "name: Roma"
 -- Right ("Roma",Nothing)
 object :: FieldParser a -> Parser a
-object (FieldParser (Pair (ReaderT parseFn) (Constant names))) = fromComponent $ Z $ ParserComponent $ Just $ \(I o :* Nil) ->
+object (FieldParser (Pair (ReaderT parseFn) (Constant names))) = fromComponent $ Z $ ParserComponent $ Just $ const $ \(I o :* Nil) ->
   incErrLevel $
     parseFn o <*
     (case HM.keys (HM.difference o names) of

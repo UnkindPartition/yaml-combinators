@@ -34,6 +34,12 @@ tests = testGroup "Data.Yaml.Combinators"
   , testCase "Expect an object, get an object" $
       runParser (object $ field "foo" number) (Object [("foo", Number 1)]) @?=
         Right 1
+  , testCase "Validated String, accepts anything" $
+      runParser (validate string Right) (String "foo") @?=
+        Right "foo"
+  , testCase "Validated String, rejects everything" $
+      runParser (validate string (const (Left "contrarianism" :: Either String String))) (String "foo") @?=
+        Left (ParseError 1 (ExpectedInsteadOf "contrarianism" (String "foo")))
   , testCase "Expect an object, get an array" $
       runParser (object $ field "foo" number) (Array []) @?=
         Left (ParseError 0 $ ExpectedInsteadOf "Object" (Array []))
@@ -52,6 +58,12 @@ tests = testGroup "Data.Yaml.Combinators"
   , testCase "Expect an object with opt field, field absent" $
       runParser (object $ optField "foo" number) (Object []) @?=
         Right Nothing
+  , testCase "Expect an object with default field, field present" $
+      runParser (object $ defaultField "foo" 7 number) (Object [("foo", Number 16309)]) @?=
+        Right 16309
+  , testCase "Expect an object with default field, field present" $
+      runParser (object $ defaultField "foo" 7 number) (Object []) @?=
+        Right 7
   , testCase "Expect an array of number and string, get it" $
       runParser
         (theArray $ (,) <$> element number <*> element string)

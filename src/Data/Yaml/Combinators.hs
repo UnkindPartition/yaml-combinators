@@ -302,6 +302,15 @@ bool = fromComponent $ S . S . S . S . Z $ ParserComponent $ Just $ const $ \(I 
 
 -- | Make a parser match only valid values.
 --
+-- If the validator does not accept the value, it should return a
+-- 'Left' 'String' with a noun phrase that characterizes the expected
+-- value, as in the example:
+--
+-- >>> let acceptEven n = if even n then Right n else Left "an even number"
+-- >>> either putStr print $ parse (integer @Int `validate` acceptEven) "2017"
+-- Expected an even number instead of:
+-- <BLANKLINE>
+-- 2017
 validate ::
   Parser a -- ^ parser to wrap
   -> (a -> Either String b) -- ^ validator

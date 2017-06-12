@@ -4,7 +4,8 @@
 name:                yaml-combinators
 version:             1.0
 synopsis:            YAML parsing combinators for improved validation and error reporting
--- description:
+description:         Based on the article
+                     <https://ro-che.info/articles/2015-07-26-better-yaml-parsing Better Yaml Parsing>.
 homepage:            https://github.com/feuerbach/yaml-combinators
 license:             MIT
 license-file:        LICENSE
@@ -17,7 +18,13 @@ build-type:          Simple
 extra-source-files:  ChangeLog.md, README.md
 cabal-version:       >=1.10
 
+source-repository head
+  type:     git
+  location: git://github.com/feuerbach/yaml-combinators.git
+
 library
+  default-language:
+    Haskell2010
   exposed-modules:
     Data.Yaml.Combinators
   -- other-modules:
@@ -62,3 +69,5 @@ test-suite doctests
   main-is:
     doctests.hs
   build-depends: base, doctest
+  default-language:
+    Haskell2010

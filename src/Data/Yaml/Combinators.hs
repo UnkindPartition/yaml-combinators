@@ -50,7 +50,6 @@ import Data.Functor.Constant
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HM
 import Generics.SOP
-import Generics.SOP.Classes
 import Generics.SOP.TH
 
 -- $setup

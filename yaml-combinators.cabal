@@ -26,7 +26,7 @@ library
     aeson,
     base < 5,
     bytestring,
-    generics-sop,
+    generics-sop >= 0.2.5,
     scientific,
     text,
     transformers,

@@ -311,6 +311,8 @@ bool = fromComponent $ S . S . S . S . Z $ ParserComponent $ Just $ const $ \(I 
 -- Expected an even number instead of:
 -- <BLANKLINE>
 -- 2017
+--
+-- @since 1.0.1
 validate ::
   Parser a -- ^ parser to wrap
   -> (a -> Either String b) -- ^ validator

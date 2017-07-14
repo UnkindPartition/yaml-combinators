@@ -15,6 +15,7 @@ module Data.Yaml.Combinators
   , number
   , integer
   , bool
+  , null_
   -- * Arrays
   , array
   , theArray
@@ -299,6 +300,13 @@ integer = fromComponent $ S . S . S . Z $ ParserComponent $ Just $ const $ \(I n
 -- Right True
 bool :: Parser Bool
 bool = fromComponent $ S . S . S . S . Z $ ParserComponent $ Just $ const $ \(I b :* Nil) -> Right b
+
+-- | Match the @null@ value.
+--
+-- >>> parse null_ "null"
+-- Right ()
+null_ :: Parser ()
+null_ = fromComponent $ S . S . S . S . S . Z $ ParserComponent $ Just $ const $ \Nil -> Right ()
 
 -- | Make a parser match only valid values.
 --

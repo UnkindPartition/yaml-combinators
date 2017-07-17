@@ -96,6 +96,12 @@ data Reason
 mergeParseError :: ParseError -> ParseError -> ParseError
 mergeParseError e1@(ParseError l1 r1) e2@(ParseError l2 r2) =
   case compare l1 l2 of
+    -- Prioritize the UnexpectedAsPartOf error, as it is less "damning",
+    -- and the parser that produced it is more likely to be the intended one.
+    -- see the "Wrong tag" test case
+    _ | UnexpectedAsPartOf {} <- r1 -> e1
+    _ | UnexpectedAsPartOf {} <- r2 -> e2
+
     GT -> e1
     EQ
       | ExpectedAsPartOf exp1 w1 <- r1

@@ -88,4 +88,13 @@ tests = testGroup "Data.Yaml.Combinators"
         (Array [Number 2, String "hi", Number 42])
         @?=
         Left (ParseError 1 $ UnexpectedAsPartOf (Number 42) (Array [Number 2.0,String "hi",Number 42]))
+  , testCase "Wrong tag" $
+      runParser
+        ((object (Nothing <$ theField "tag" "Nothing")) <>
+         (object (Just <$ theField "tag" "Just" <*> field "value" number)))
+        (Object [("tag", String "Nothing"), ("value", Number 3)])
+        @?=
+        Left (ParseError 1 (UnexpectedAsPartOf
+          (Object ([("value",Number 3.0)]))
+          (Object ([("tag",String "Nothing"),("value",Number 3.0)]))))
   ]

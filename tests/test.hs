@@ -97,4 +97,10 @@ tests = testGroup "Data.Yaml.Combinators"
         Left (ParseError 1 (UnexpectedAsPartOf
           (Object ([("value",Number 3.0)]))
           (Object ([("tag",String "Nothing"),("value",Number 3.0)]))))
+  , testCase "More serious error takes precedence even though it happens later" $
+      runParser
+        (theArray (element (object (pure ())) *> element number))
+        (Array [Object [("foo","bar")], String "baz"])
+        @?=
+        Left (ParseError 2 (ExpectedInsteadOf "Number" (String "baz")))
   ]

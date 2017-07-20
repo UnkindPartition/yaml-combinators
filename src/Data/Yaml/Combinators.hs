@@ -41,17 +41,18 @@ import Data.Text (Text)
 import Data.List
 import Data.Maybe
 import Data.ByteString (ByteString)
+import Data.Monoid ((<>))
 import qualified Data.ByteString.Char8 as BS8
 import Data.Bifunctor (first)
 import Control.Monad.Trans.Reader
 import Control.Monad.Trans.State as State
-import Control.Monad.Trans.Class
 import Data.Vector (Vector)
 import qualified Data.Vector as V
 import Data.Functor.Product
 import Data.Functor.Constant
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HM
+import Data.Ord
 import Generics.SOP
 import Generics.SOP.TH
 
@@ -59,6 +60,7 @@ import Generics.SOP.TH
 -- >>> :set -XOverloadedStrings -XTypeApplications
 -- >>> import Data.Monoid
 
+-- orphan Value instances
 deriveGeneric ''Value
 
 ----------------------------------------------------------------------
@@ -88,10 +90,50 @@ data ParseError = ParseError
 
 -- | Describes what exactly went wrong during parsing.
 data Reason
+  -- NB: the order of constructors is important for the Ord instance
   = UnexpectedAsPartOf Value Value
   | ExpectedAsPartOf String Value
   | ExpectedInsteadOf String Value
   deriving (Eq, Show)
+
+-- | Find out which error is more severe
+compareSeverity :: ParseError -> ParseError -> Ordering
+compareSeverity (ParseError l1 r1) (ParseError l2 r2) =
+  -- extra stuff is always less severe than mismatching/missing stuff
+  comparing (not . isUnexpected) r1 r2 <>
+  -- otherwise, compare the depths
+  compare l1 l2 <>
+  -- if the depths are equal, mismatches are more severe that misses,
+  comparing isMismatch r1 r2
+  where
+    isUnexpected e = case e of
+      UnexpectedAsPartOf {} -> True
+      _ -> False
+    isMismatch e = case e of
+      ExpectedInsteadOf {} -> True
+      _ -> False
+
+-- | Choose the more severe of two errors.
+--
+-- If they are equally severe, pick the earlier one.
+moreSevere :: ParseError -> ParseError -> ParseError
+moreSevere e1 e2 =
+  case compareSeverity e1 e2 of
+    LT -> e2
+    _ -> e1
+
+newtype Validation a = Validation { getValidation :: Either ParseError a }
+  deriving Functor
+
+instance Applicative Validation where
+  pure = Validation . Right
+  Validation a <*> Validation b = Validation $
+    case a of
+      Right va -> fmap va b
+      Left ea -> either (Left . moreSevere ea) (const $ Left ea) b
+
+bindV :: Validation a -> (a -> Validation b) -> Validation b
+bindV a b = Validation $ getValidation a >>= getValidation . b
 
 mergeParseError :: ParseError -> ParseError -> ParseError
 mergeParseError e1@(ParseError l1 r1) e2@(ParseError l2 r2) =
@@ -131,7 +173,7 @@ ppParseError (ParseError _lvl reason) =
 --                           Core definitions
 ----------------------------------------------------------------------
 
-newtype ParserComponent a fs = ParserComponent (Maybe (Value -> NP I fs -> Either ParseError a))
+newtype ParserComponent a fs = ParserComponent (Maybe (Value -> NP I fs -> Validation a))
 -- | A top-level YAML parser.
 --
 -- * Construct a 'Parser' with 'string', 'number', 'integer', 'bool', 'array', or 'object'.
@@ -157,8 +199,8 @@ instance Monoid (ParserComponent a fs) where
       (Nothing, Nothing) -> Nothing
       (Just p1, Nothing) -> Just p1
       (Nothing, Just p2) -> Just p2
-      (Just p1, Just p2) -> Just $ \o v ->
-        case (p1 o v, p2 o v) of
+      (Just p1, Just p2) -> Just $ \o v -> Validation $
+        case (getValidation $ p1 o v, getValidation $ p2 o v) of
           (Right r1, _) -> Right r1
           (_, Right r2) -> Right r2
           (Left l1, Left l2) -> Left $ mergeParseError l1 l2
@@ -169,13 +211,16 @@ instance Monoid (Parser a) where
 
 -- | A low-level function to run a 'Parser'.
 runParser :: Parser a -> Value -> Either ParseError a
-runParser (Parser comps) orig@(from -> SOP v) =
+runParser p = getValidation . runParserV p
+
+runParserV :: Parser a -> Value -> Validation a
+runParserV (Parser comps) orig@(from -> SOP v) =
   hcollapse $ hliftA2 match comps v
   where
-    match :: ParserComponent a fs -> NP I fs -> K (Either ParseError a) fs
+    match :: ParserComponent a fs -> NP I fs -> K (Validation a) fs
     match (ParserComponent mbP) v1 = K $
       case mbP of
-        Nothing -> Left $ ParseError 0 $ ExpectedInsteadOf expected orig
+        Nothing -> Validation . Left $ ParseError 0 $ ExpectedInsteadOf expected orig
         Just p -> p orig v1
 
     expected =
@@ -202,24 +247,22 @@ decorate (Parser components) decorator = Parser $ hmap wrap components
     wrap (ParserComponent maybeP) = ParserComponent $
       case maybeP of
         Nothing -> Nothing
-        Just p -> Just $ \orig val ->
-          case p orig val of
-            Left err     -> Left err
-            Right parsed -> decorator parsed orig
+        Just p -> Just $ \orig val -> p orig val `bindV`
+          \parsed -> Validation $ decorator parsed orig
 
 ----------------------------------------------------------------------
 --                           Combinators
 ----------------------------------------------------------------------
 
-incErrLevel :: Either ParseError a -> Either ParseError a
-incErrLevel = first $ \(ParseError l r) -> ParseError (l+1) r
+incErrLevel :: Validation a -> Validation a
+incErrLevel = Validation . first (\(ParseError l r) -> ParseError (l+1) r) . getValidation
 
 -- | Match a single YAML string.
 --
 -- >>> parse string "howdy"
 -- Right "howdy"
 string :: Parser Text
-string = fromComponent $ S . S . Z $ ParserComponent $ Just $ const $ \(I s :* Nil) -> Right s
+string = fromComponent $ S . S . Z $ ParserComponent $ Just $ const $ \(I s :* Nil) -> pure s
 
 -- | Match a specific YAML string, usually a «tag» identifying a particular
 -- form of an array or object.
@@ -232,7 +275,7 @@ string = fromComponent $ S . S . Z $ ParserComponent $ Just $ const $ \(I s :* N
 -- bye
 theString :: Text -> Parser ()
 theString t = fromComponent $ S . S . Z $ ParserComponent $ Just $ const $ \(I s :* Nil) ->
-  if s == t
+  Validation $ if s == t
     then Right ()
     else Left $ ParseError 1 (ExpectedInsteadOf (show t) (String s))
 
@@ -243,7 +286,7 @@ theString t = fromComponent $ S . S . Z $ ParserComponent $ Just $ const $ \(I s
 -- >>> parse (array string) "[a,b,c]"
 -- Right ["a","b","c"]
 array :: Parser a -> Parser (Vector a)
-array p = fromComponent $ S . Z $ ParserComponent $ Just $ const $ \(I a :* Nil) -> incErrLevel $ mapM (runParser p) a
+array p = fromComponent $ S . Z $ ParserComponent $ Just $ const $ \(I a :* Nil) -> incErrLevel $ traverse (runParserV p) a
 
 -- | An 'ElementParser' describes how to parse a fixed-size array
 -- where each positional element has its own parser.
@@ -254,21 +297,22 @@ array p = fromComponent $ S . Z $ ParserComponent $ Just $ const $ \(I a :* Nil)
 -- * Construct an 'ElementParser' with 'element' and the 'Applicative' combinators.
 --
 -- * Turn a 'FieldParser' into a 'Parser' with 'theArray'.
-newtype ElementParser a = ElementParser (StateT [Value] (Either (Array -> ParseError)) a)
+newtype ElementParser a = ElementParser
+  (((State [Value]) :.: (ReaderT Array Validation)) a)
   deriving (Functor, Applicative)
 
 -- | Construct an 'ElementParser' that parses the current array element
 -- with the given 'Parser'.
 element :: Parser a -> ElementParser a
-element p = ElementParser $ do
+element p = ElementParser $ Comp $ do
   vs <- State.get
   case vs of
-    [] -> lift $ Left $ \arr ->
+    [] -> return $ ReaderT $ \arr -> Validation . Left $
       let n = V.length arr + 1
       in ParseError 0 $ ExpectedAsPartOf ("at least " ++ show n ++ " elements") $ Array arr
     (v:vs') -> do
       State.put vs'
-      lift $ first const $ incErrLevel $ runParser p v
+      return . liftR $ incErrLevel $ runParserV p v
 
 -- | Match an array consisting of a fixed number of elements. The way each
 -- element is parsed depends on its position within the array and
@@ -277,18 +321,21 @@ element p = ElementParser $ do
 -- >>> parse (theArray $ (,) <$> element string <*> element bool) "[f, true]"
 -- Right ("f",True)
 theArray :: ElementParser a -> Parser a
-theArray (ElementParser ep) = fromComponent $ S . Z $ ParserComponent $ Just $ const $ \(I a :* Nil) -> incErrLevel $
-  case runStateT ep (V.toList a) of
-    Right (r, []) -> return r
-    Right (_, v:_) -> Left $ ParseError 0 $ UnexpectedAsPartOf v $ Array a
-    Left errFn -> Left $ errFn a
+theArray (ElementParser (Comp ep)) = fromComponent $ S . Z $ ParserComponent $ Just $ const $ \(I a :* Nil) -> incErrLevel $
+  case first (flip runReaderT a) $ runState ep (V.toList a) of
+    (result, leftover) ->
+      result <*
+      (case leftover of
+        [] -> pure ()
+        v : _ -> Validation . Left $ ParseError 0 $ UnexpectedAsPartOf v $ Array a
+      )
 
 -- | Match a real number.
 --
 -- >>> parse number "3.14159"
 -- Right 3.14159
 number :: Parser Scientific
-number = fromComponent $ S . S . S . Z $ ParserComponent $ Just $ const $ \(I n :* Nil) -> Right n
+number = fromComponent $ S . S . S . Z $ ParserComponent $ Just $ const $ \(I n :* Nil) -> pure n
 
 -- | Match an integer.
 --
@@ -297,22 +344,22 @@ number = fromComponent $ S . S . S . Z $ ParserComponent $ Just $ const $ \(I n 
 integer :: (Integral i, Bounded i) => Parser i
 integer = fromComponent $ S . S . S . Z $ ParserComponent $ Just $ const $ \(I n :* Nil) ->
   case toBoundedInteger n of
-    Just i -> Right i
-    Nothing -> Left $ ParseError 0 $ ExpectedInsteadOf "integer" (Number n)
+    Just i -> pure i
+    Nothing -> Validation . Left $ ParseError 0 $ ExpectedInsteadOf "integer" (Number n)
 
 -- | Match a boolean.
 --
 -- >>> parse bool "yes"
 -- Right True
 bool :: Parser Bool
-bool = fromComponent $ S . S . S . S . Z $ ParserComponent $ Just $ const $ \(I b :* Nil) -> Right b
+bool = fromComponent $ S . S . S . S . Z $ ParserComponent $ Just $ const $ \(I b :* Nil) -> pure b
 
 -- | Match the @null@ value.
 --
 -- >>> parse null_ "null"
 -- Right ()
 null_ :: Parser ()
-null_ = fromComponent $ S . S . S . S . S . Z $ ParserComponent $ Just $ const $ \Nil -> Right ()
+null_ = fromComponent $ S . S . S . S . S . Z $ ParserComponent $ Just $ const $ \Nil -> pure ()
 
 -- | Make a parser match only valid values.
 --
@@ -344,7 +391,7 @@ validate parser validator =
 -- * Turn a 'FieldParser' into a 'Parser' with 'object'.
 newtype FieldParser a = FieldParser
   (Product
-    (ReaderT Object (Either ParseError))
+    (ReaderT Object Validation)
     (Constant (HashMap Text ())) a)
   deriving (Functor, Applicative)
 
@@ -358,8 +405,8 @@ field name p = FieldParser $
   Pair
     (ReaderT $ \o ->
       case HM.lookup name o of
-        Nothing -> Left $ ParseError 0 $ ExpectedAsPartOf ("field " ++ show name) $ Object o
-        Just v -> incErrLevel $ runParser p v
+        Nothing -> Validation . Left $ ParseError 0 $ ExpectedAsPartOf ("field " ++ show name) $ Object o
+        Just v -> incErrLevel $ runParserV p v
     )
     (Constant $ HM.singleton name ())
 
@@ -371,7 +418,7 @@ optField
   -> FieldParser (Maybe a)
 optField name p = FieldParser $
   Pair
-    (ReaderT $ \o -> traverse (incErrLevel . runParser p) $ HM.lookup name o)
+    (ReaderT $ \o -> traverse (incErrLevel . runParserV p) $ HM.lookup name o)
     (Constant $ HM.singleton name ())
 
 -- | Declare an optional object field with the given name and with a default
@@ -419,5 +466,9 @@ object (FieldParser (Pair (ReaderT parseFn) (Constant names))) = fromComponent $
       [] -> pure ()
       name : _ ->
         let v = o HM.! name
-        in Left $ ParseError 0 $ UnexpectedAsPartOf (Object (HM.singleton name v)) (Object o)
+        in Validation . Left $ ParseError 0 $ UnexpectedAsPartOf (Object (HM.singleton name v)) (Object o)
     )
+
+-- | Like 'lift' for 'ReaderT', but doesn't require a 'Monad' instance
+liftR :: f a -> ReaderT r f a
+liftR = ReaderT . const

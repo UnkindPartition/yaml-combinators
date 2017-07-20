@@ -122,6 +122,15 @@ moreSevere e1 e2 =
     LT -> e2
     _ -> e1
 
+-- | Choose the less severe of two errors.
+--
+-- If they are equally severe, pick the earlier one.
+lessSevere :: ParseError -> ParseError -> ParseError
+lessSevere e1 e2 =
+  case compareSeverity e1 e2 of
+    GT -> e2
+    _ -> e1
+
 newtype Validation a = Validation { getValidation :: Either ParseError a }
   deriving Functor
 
@@ -136,25 +145,21 @@ bindV :: Validation a -> (a -> Validation b) -> Validation b
 bindV a b = Validation $ getValidation a >>= getValidation . b
 
 mergeParseError :: ParseError -> ParseError -> ParseError
-mergeParseError e1@(ParseError l1 r1) e2@(ParseError l2 r2) =
-  case compare l1 l2 of
-    -- Prioritize the UnexpectedAsPartOf error, as it is less "damning",
-    -- and the parser that produced it is more likely to be the intended one.
-    -- see the "Wrong tag" test case
-    _ | UnexpectedAsPartOf {} <- r1 -> e1
-    _ | UnexpectedAsPartOf {} <- r2 -> e2
-
-    GT -> e1
-    EQ
-      | ExpectedAsPartOf exp1 w1 <- r1
-      , ExpectedAsPartOf exp2 w2 <- r2
-      , w1 == w2
-      -> ParseError l1 (ExpectedAsPartOf (exp1 ++ ", " ++ exp2) w1)
-      | ExpectedInsteadOf exp1 w1 <- r1
-      , ExpectedInsteadOf exp2 w2 <- r2
-      , w1 == w2
-      -> ParseError l1 (ExpectedInsteadOf (exp1 ++ ", " ++ exp2) w1)
-    _ -> e2
+mergeParseError e1@(ParseError l1 r1) e2@(ParseError l2 r2)
+  -- first, see if we can merge the two errors
+  | l1 == l2
+  , ExpectedAsPartOf exp1 w1 <- r1
+  , ExpectedAsPartOf exp2 w2 <- r2
+  , w1 == w2
+  = ParseError l1 (ExpectedAsPartOf (exp1 ++ ", " ++ exp2) w1)
+  | l1 == l2
+  , ExpectedInsteadOf exp1 w1 <- r1
+  , ExpectedInsteadOf exp2 w2 <- r2
+  , w1 == w2
+  = ParseError l1 (ExpectedInsteadOf (exp1 ++ ", " ++ exp2) w1)
+  -- otherwise, just choose the least severe one,
+  -- since its branch is more likely to be the right one
+  | otherwise = lessSevere e1 e2
 
 ppParseError :: ParseError -> String
 ppParseError (ParseError _lvl reason) =

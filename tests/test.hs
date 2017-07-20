@@ -51,7 +51,7 @@ tests = testGroup "Data.Yaml.Combinators"
         Left (ParseError 1 $ UnexpectedAsPartOf (Object [("bar", String "x")]) (Object [("foo", Number 1), ("bar", String "x")]))
   , testCase "Expect an object, get a field that doesn't match" $
       runParser (object $ field "foo" number) (Object [("foo", String "hi")]) @?=
-        Left (ParseError 2 $ ExpectedInsteadOf "Number" (String "hi"))
+        Left (ParseError 1 $ ExpectedInsteadOf "Number" (String "hi"))
   , testCase "Expect an object with opt field, field present" $
       runParser (object $ optField "foo" number) (Object [("foo", Number 1)]) @?=
         Right (Just 1)
@@ -81,7 +81,7 @@ tests = testGroup "Data.Yaml.Combinators"
         (theArray $ (,) <$> element number <*> element string)
         (Array [String "hi"])
         @?=
-        Left (ParseError 2 $ ExpectedInsteadOf "Number" (String "hi"))
+        Left (ParseError 1 $ ExpectedInsteadOf "Number" (String "hi"))
   , testCase "Expect an array of number and string, get them and something else" $
       runParser
         (theArray $ (,) <$> element number <*> element string)
@@ -102,5 +102,5 @@ tests = testGroup "Data.Yaml.Combinators"
         (theArray (element (object (pure ())) *> element number))
         (Array [Object [("foo","bar")], String "baz"])
         @?=
-        Left (ParseError 2 (ExpectedInsteadOf "Number" (String "baz")))
+        Left (ParseError 1 (ExpectedInsteadOf "Number" (String "baz")))
   ]

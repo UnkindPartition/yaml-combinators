@@ -312,7 +312,7 @@ element p = ElementParser $ Comp $ do
       in ParseError 0 $ ExpectedAsPartOf ("at least " ++ show n ++ " elements") $ Array arr
     (v:vs') -> do
       State.put vs'
-      return . liftR $ incErrLevel $ runParserV p v
+      return . liftR $ runParserV p v
 
 -- | Match an array consisting of a fixed number of elements. The way each
 -- element is parsed depends on its position within the array and
@@ -406,7 +406,7 @@ field name p = FieldParser $
     (ReaderT $ \o ->
       case HM.lookup name o of
         Nothing -> Validation . Left $ ParseError 0 $ ExpectedAsPartOf ("field " ++ show name) $ Object o
-        Just v -> incErrLevel $ runParserV p v
+        Just v -> runParserV p v
     )
     (Constant $ HM.singleton name ())
 
@@ -418,7 +418,7 @@ optField
   -> FieldParser (Maybe a)
 optField name p = FieldParser $
   Pair
-    (ReaderT $ \o -> traverse (incErrLevel . runParserV p) $ HM.lookup name o)
+    (ReaderT $ \o -> traverse (runParserV p) $ HM.lookup name o)
     (Constant $ HM.singleton name ())
 
 -- | Declare an optional object field with the given name and with a default

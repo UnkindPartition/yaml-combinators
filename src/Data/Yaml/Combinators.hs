@@ -277,7 +277,7 @@ theString :: Text -> Parser ()
 theString t = fromComponent $ S . S . Z $ ParserComponent $ Just $ const $ \(I s :* Nil) ->
   Validation $ if s == t
     then Right ()
-    else Left $ ParseError 1 (ExpectedInsteadOf (show t) (String s))
+    else Left $ ParseError 0 (ExpectedInsteadOf (show t) (String s))
 
 -- | Match an array of elements, where each of elements are matched by
 -- the same parser. This is the function you'll use most of the time when

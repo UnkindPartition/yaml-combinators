@@ -18,10 +18,10 @@ tests = testGroup "Data.Yaml.Combinators"
         Left (ParseError 0 $ ExpectedInsteadOf "String" (Number 3))
   , testCase "Expect specific String, get another String" $
       runParser (theString "bye") (String "hi") @?=
-        Left (ParseError 1 $ ExpectedInsteadOf "\"bye\"" (String "hi"))
+        Left (ParseError 0 $ ExpectedInsteadOf "\"bye\"" (String "hi"))
   , testCase "Expect specific String or Number, get another string" $
       runParser (theString "bye" <> void number) (String "hi") @?=
-        Left (ParseError 1 $ ExpectedInsteadOf "\"bye\"" (String "hi"))
+        Left (ParseError 0 $ ExpectedInsteadOf "\"bye\"" (String "hi"))
   , testCase "Expect an array, get an array" $
       runParser (array string) (Array [String "hi"]) @?=
         Right ["hi"]

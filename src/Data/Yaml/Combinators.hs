@@ -164,6 +164,9 @@ mergeParseError e1@(ParseError l1 r1) e2@(ParseError l2 r2)
   -- since its branch is more likely to be the right one
   | otherwise = lessSevere e1 e2
 
+-- | Pretty-print a 'ParseError'
+--
+-- @since 1.1
 ppParseError :: ParseError -> String
 ppParseError (ParseError _lvl reason) =
   case reason of
@@ -369,6 +372,8 @@ bool = fromComponent $ S . S . S . S . Z $ ParserComponent $ Just $ const $ \(I 
 --
 -- >>> parse null_ "null"
 -- Right ()
+--
+-- @since 1.1
 null_ :: Parser ()
 null_ = fromComponent $ S . S . S . S . S . Z $ ParserComponent $ Just $ const $ \Nil -> pure ()
 

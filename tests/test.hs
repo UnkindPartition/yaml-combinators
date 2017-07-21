@@ -103,4 +103,42 @@ tests = testGroup "Data.Yaml.Combinators"
         (Array [Object [("foo","bar")], String "baz"])
         @?=
         Left (ParseError 1 (ExpectedInsteadOf "Number" (String "baz")))
+  , testCase "Prefer the branch with missing data to the branch with mismatched tag" $ do
+      let
+        p1 = object $ ()
+          <$ theField "tag" "one"
+          <* field "a" string
+
+        p2 = object $ ()
+          <$ theField "tag" "two"
+
+        v = Object [("tag", String "one")]
+        expected_result = Left (ParseError 1
+          (ExpectedAsPartOf
+            "field \"a\""
+            v
+          ))
+      runParser p1 v @?= expected_result
+      runParser (p1 <> p2) v @?= expected_result
+      runParser (p2 <> p1) v @?= expected_result
+  , testCase "When a tag is mismatched, all alternatives get collected" $ do
+      let
+        p1 = object $ ()
+          <$ theField "tag" "one"
+          <* field "a" string
+
+        p2 = object $ ()
+          <$ theField "tag" "two"
+
+        p3 = object $ ()
+          <$ theField "foo" "bar"
+          <* theField "tag" "three"
+
+        v = Object [("tag", String "xxx"),("garbage",Number 7)]
+        expected_result = Left (ParseError 1
+          (ExpectedInsteadOf
+            "\"one\", \"two\", \"three\""
+            (String "xxx")
+          ))
+      runParser (p1 <> p2 <> p3) v @?= expected_result
   ]

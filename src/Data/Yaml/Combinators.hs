@@ -52,6 +52,8 @@ import Data.Functor.Product
 import Data.Functor.Constant
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HM
+import Data.HashSet (HashSet)
+import qualified Data.HashSet as HS
 import Data.Ord
 import Generics.SOP
 import Generics.SOP.TH
@@ -92,8 +94,8 @@ data ParseError = ParseError
 data Reason
   -- NB: the order of constructors is important for the Ord instance
   = UnexpectedAsPartOf Value Value
-  | ExpectedAsPartOf String Value
-  | ExpectedInsteadOf String Value
+  | ExpectedAsPartOf (HashSet String) Value
+  | ExpectedInsteadOf (HashSet String) Value
   deriving (Eq, Show)
 
 -- | Find out which error is more severe
@@ -151,12 +153,12 @@ mergeParseError e1@(ParseError l1 r1) e2@(ParseError l2 r2)
   , ExpectedAsPartOf exp1 w1 <- r1
   , ExpectedAsPartOf exp2 w2 <- r2
   , w1 == w2
-  = ParseError l1 (ExpectedAsPartOf (exp1 ++ ", " ++ exp2) w1)
+  = ParseError l1 (ExpectedAsPartOf (exp1 <> exp2) w1)
   | l1 == l2
   , ExpectedInsteadOf exp1 w1 <- r1
   , ExpectedInsteadOf exp2 w2 <- r2
   , w1 == w2
-  = ParseError l1 (ExpectedInsteadOf (exp1 ++ ", " ++ exp2) w1)
+  = ParseError l1 (ExpectedInsteadOf (exp1 <> exp2) w1)
   -- otherwise, just choose the least severe one,
   -- since its branch is more likely to be the right one
   | otherwise = lessSevere e1 e2
@@ -167,12 +169,15 @@ ppParseError (ParseError _lvl reason) =
     UnexpectedAsPartOf part whole ->
       "Unexpected \n\n" ++ showYaml part ++ "\nas part of\n\n" ++ showYaml whole
     ExpectedInsteadOf exp1 got ->
-      "Expected " ++ exp1 ++ " instead of:\n\n" ++ showYaml got
+      "Expected " ++ fmt_list exp1 ++ " instead of:\n\n" ++ showYaml got
     ExpectedAsPartOf exp1 got ->
-      "Expected " ++ exp1 ++ " as part of:\n\n" ++ showYaml got
+      "Expected " ++ fmt_list exp1 ++ " as part of:\n\n" ++ showYaml got
   where
     showYaml :: Value -> String
     showYaml = BS8.unpack . encode
+
+    fmt_list :: HashSet String -> String
+    fmt_list = intercalate ", " . sort . HS.toList
 
 ----------------------------------------------------------------------
 --                           Core definitions
@@ -225,7 +230,7 @@ runParserV (Parser comps) orig@(from -> SOP v) =
     match :: ParserComponent a fs -> NP I fs -> K (Validation a) fs
     match (ParserComponent mbP) v1 = K $
       case mbP of
-        Nothing -> Validation . Left $ ParseError 0 $ ExpectedInsteadOf expected orig
+        Nothing -> Validation . Left $ ParseError 0 $ ExpectedInsteadOf (HS.singleton expected) orig
         Just p -> p orig v1
 
     expected =
@@ -282,7 +287,7 @@ theString :: Text -> Parser ()
 theString t = fromComponent $ S . S . Z $ ParserComponent $ Just $ const $ \(I s :* Nil) ->
   Validation $ if s == t
     then Right ()
-    else Left $ ParseError 0 (ExpectedInsteadOf (show t) (String s))
+    else Left $ ParseError 0 (ExpectedInsteadOf (HS.singleton $ show t) (String s))
 
 -- | Match an array of elements, where each of elements are matched by
 -- the same parser. This is the function you'll use most of the time when
@@ -314,7 +319,7 @@ element p = ElementParser $ Comp $ do
   case vs of
     [] -> return $ ReaderT $ \arr -> Validation . Left $
       let n = V.length arr + 1
-      in ParseError 0 $ ExpectedAsPartOf ("at least " ++ show n ++ " elements") $ Array arr
+      in ParseError 0 $ ExpectedAsPartOf (HS.singleton $ "at least " ++ show n ++ " elements") $ Array arr
     (v:vs') -> do
       State.put vs'
       return . liftR $ runParserV p v
@@ -350,7 +355,7 @@ integer :: (Integral i, Bounded i) => Parser i
 integer = fromComponent $ S . S . S . Z $ ParserComponent $ Just $ const $ \(I n :* Nil) ->
   case toBoundedInteger n of
     Just i -> pure i
-    Nothing -> Validation . Left $ ParseError 0 $ ExpectedInsteadOf "integer" (Number n)
+    Nothing -> Validation . Left $ ParseError 0 $ ExpectedInsteadOf (HS.singleton "integer") (Number n)
 
 -- | Match a boolean.
 --
@@ -387,7 +392,7 @@ validate parser validator =
   decorate parser (validity . validator)
   where
     validity (Right result) _    = Right result
-    validity (Left problem) orig = Left $ ParseError 1 $ ExpectedInsteadOf problem orig
+    validity (Left problem) orig = Left $ ParseError 1 $ ExpectedInsteadOf (HS.singleton problem) orig
 
 -- | A 'FieldParser' describes how to parse an object.
 --
@@ -410,7 +415,7 @@ field name p = FieldParser $
   Pair
     (ReaderT $ \o ->
       case HM.lookup name o of
-        Nothing -> Validation . Left $ ParseError 0 $ ExpectedAsPartOf ("field " ++ show name) $ Object o
+        Nothing -> Validation . Left $ ParseError 0 $ ExpectedAsPartOf (HS.singleton $ "field " ++ show name) $ Object o
         Just v -> runParserV p v
     )
     (Constant $ HM.singleton name ())

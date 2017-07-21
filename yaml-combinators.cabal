@@ -58,6 +58,7 @@ test-suite test
     , aeson
     , tasty
     , tasty-hunit
+    , text
     , unordered-containers
     , yaml-combinators
 

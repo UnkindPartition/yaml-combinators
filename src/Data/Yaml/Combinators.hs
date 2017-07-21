@@ -30,6 +30,7 @@ module Data.Yaml.Combinators
   , theField
   -- * Errors
   , ParseError(..)
+  , ppParseError
   , Reason(..)
   , validate
   ) where

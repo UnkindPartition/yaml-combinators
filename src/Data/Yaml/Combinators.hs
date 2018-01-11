@@ -28,6 +28,7 @@ module Data.Yaml.Combinators
   , optField
   , defaultField
   , theField
+  , anyValue
   -- * Errors
   , ParseError(..)
   , ppParseError
@@ -484,6 +485,15 @@ object (FieldParser (Pair (ReaderT parseFn) (Constant names))) = fromComponent $
         let v = o HM.! name
         in Validation . Left $ ParseError 0 $ UnexpectedAsPartOf (Object (HM.singleton name v)) (Object o)
     )
+
+-- | Match any JSON value and return it as Aeson's 'Value'.
+--
+-- >>> parse anyValue "[one, two, {three: four}]"
+-- Right (Array [String "one",String "two",Object (fromList [("three",String "four")])])
+--
+-- @since 1.1.1
+anyValue :: Parser Value
+anyValue = Parser $ hpure $ ParserComponent . Just $ \val _np -> pure val
 
 -- | Like 'lift' for 'ReaderT', but doesn't require a 'Monad' instance
 liftR :: f a -> ReaderT r f a

@@ -1,5 +1,9 @@
 # Revision history for yaml-combinators
 
+## 1.1.1
+
+Add `anyValue`, which parses any JSON value
+
 ## 1.1
 
 * Add `null_`

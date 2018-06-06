@@ -43,7 +43,7 @@ import Data.Text (Text)
 import Data.List
 import Data.Maybe
 import Data.ByteString (ByteString)
-import Data.Monoid ((<>))
+import Data.Semigroup (Semigroup((<>)))
 import qualified Data.ByteString.Char8 as BS8
 import Data.Bifunctor (first)
 import Control.Monad.Trans.Reader
@@ -62,7 +62,7 @@ import Generics.SOP.TH
 
 -- $setup
 -- >>> :set -XOverloadedStrings -XTypeApplications
--- >>> import Data.Monoid
+-- >>> import Data.Semigroup
 
 -- orphan Value instances
 deriveGeneric ''Value
@@ -193,8 +193,8 @@ newtype ParserComponent a fs = ParserComponent (Maybe (Value -> NP I fs -> Valid
 --
 -- * Construct a 'Parser' with 'string', 'number', 'integer', 'bool', 'array', or 'object'.
 --
--- * Combine two or more 'Parser's with 'Monoid' operators
--- such as 'mappend', 'Data.Monoid.<>', or `mconcat` —
+-- * Combine two or more 'Parser's with 'Monoid' or 'Semigroup' operators
+-- such as 'mappend', '<>', or `mconcat` —
 -- e.g. if you expect either an object or a string.
 --
 -- * Run with 'parse' or 'runParser'.
@@ -207,9 +207,8 @@ pcFmap f (ParserComponent mbP) = ParserComponent $ (fmap . fmap . fmap . fmap $ 
 instance Functor Parser where
   fmap f (Parser comps) = Parser $ hliftA (pcFmap f) comps
 
-instance Monoid (ParserComponent a fs) where
-  mempty = ParserComponent Nothing
-  ParserComponent mbP1 `mappend` ParserComponent mbP2 =
+instance Semigroup (ParserComponent a fs) where
+  ParserComponent mbP1 <> ParserComponent mbP2 =
     ParserComponent $ case (mbP1, mbP2) of
       (Nothing, Nothing) -> Nothing
       (Just p1, Nothing) -> Just p1
@@ -220,9 +219,16 @@ instance Monoid (ParserComponent a fs) where
           (_, Right r2) -> Right r2
           (Left l1, Left l2) -> Left $ mergeParseError l1 l2
 
+instance Monoid (ParserComponent a fs) where
+  mempty = ParserComponent Nothing
+  mappend = (<>)
+
+instance Semigroup (Parser a) where
+  Parser rec1 <> Parser rec2 = Parser $ hliftA2 mappend rec1 rec2
+
 instance Monoid (Parser a) where
   mempty = Parser $ hpure mempty
-  Parser rec1 `mappend` Parser rec2 = Parser $ hliftA2 mappend rec1 rec2
+  mappend = (<>)
 
 -- | A low-level function to run a 'Parser'.
 runParser :: Parser a -> Value -> Either ParseError a

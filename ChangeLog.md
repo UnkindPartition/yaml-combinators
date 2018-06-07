@@ -1,5 +1,9 @@
 # Revision history for yaml-combinators
 
+## 1.1.1.1
+
+Make compatible with GHC 8.4 and drop support for GHC 7.x
+
 ## 1.1.1
 
 Add `anyValue`, which parses any JSON value

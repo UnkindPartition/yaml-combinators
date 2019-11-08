@@ -43,7 +43,6 @@ import Data.Text (Text)
 import Data.List
 import Data.Maybe
 import Data.ByteString (ByteString)
-import Data.Semigroup (Semigroup((<>)))
 import qualified Data.ByteString.Char8 as BS8
 import Data.Bifunctor (first)
 import Control.Monad.Trans.Reader

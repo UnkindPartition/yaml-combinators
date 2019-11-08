@@ -31,7 +31,7 @@ library
   -- other-extensions:
   build-depends:
     aeson,
-    base >= 4.9 && < 5,
+    base >= 4.11 && < 5,
     bytestring,
     generics-sop >= 0.5,
     scientific,

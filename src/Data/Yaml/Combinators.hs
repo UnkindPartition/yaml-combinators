@@ -252,7 +252,7 @@ runParserV (Parser comps) orig@(from -> SOP v) =
 valueConNames :: NP (K String) (Code Value)
 valueConNames =
   let
-    ADT _ _ cons = datatypeInfo (Proxy :: Proxy Value)
+    ADT _ _ cons _ = datatypeInfo (Proxy :: Proxy Value)
   in hliftA (\(Constructor name) -> K name) cons
 
 

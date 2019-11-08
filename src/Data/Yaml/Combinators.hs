@@ -38,7 +38,7 @@ module Data.Yaml.Combinators
 
 import Data.Aeson (Value(..), Object, Array)
 import Data.Scientific
-import Data.Yaml (decodeEither, encode)
+import Data.Yaml (decodeEither', encode)
 import Data.Text (Text)
 import Data.List
 import Data.Maybe
@@ -75,7 +75,7 @@ deriveGeneric ''Value
 -- This is a high-level function implemented on top of 'runParser'.
 parse :: Parser a -> ByteString -> Either String a
 parse p bs = do
-  aesonValue <- decodeEither bs
+  aesonValue <- first show $ decodeEither' bs
   first ppParseError $ runParser p aesonValue
 
 ----------------------------------------------------------------------

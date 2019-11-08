@@ -1,5 +1,10 @@
 # Revision history for yaml-combinators
 
+## 1.1.1.2
+
+* Drop support for old GHCs
+* Update to generics-sop 0.5
+
 ## 1.1.1.1
 
 Make compatible with GHC 8.4 and drop support for GHC 7.x

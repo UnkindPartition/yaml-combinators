@@ -23,6 +23,7 @@ module Data.Yaml.Combinators
   , element
   -- * Objects
   , object
+  , objectE
   , FieldParser
   , field
   , optField
@@ -490,6 +491,18 @@ object (FieldParser (Pair (ReaderT parseFn) (Constant names))) = fromComponent $
         let v = o HM.! name
         in Validation . Left $ ParseError 0 $ UnexpectedAsPartOf (Object (HM.singleton name v)) (Object o)
     )
+
+-- | Match an object. Which set of keys to expect and how their values
+-- should be parsed is determined by the 'FieldParser'.
+--  The additional `E` means that "Extra fields are allowed", as in this example
+--
+-- >>> let p' = objectE $ (,) <$> field "name" string <*> optField "age" (integer @Int)
+-- >>> parse p' "{ name: Anton, age: 2, address: '1 High Street'}"
+-- Right ("Anton",Just 2)
+objectE :: FieldParser a -> Parser a
+objectE (FieldParser (Pair (ReaderT parseFn) _)) =
+  fromComponent $ Z $ ParserComponent $ Just $ const $ \(I o :* Nil) ->
+    incErrLevel $ parseFn o
 
 -- | Match any JSON value and return it as Aeson's 'Value'.
 --

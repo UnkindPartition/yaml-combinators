@@ -2,7 +2,7 @@
 -- documentation, see http://haskell.org/cabal/users-guide/
 
 name:                yaml-combinators
-version:             1.1.1.2
+version:             1.1.2.0
 synopsis:            YAML parsing combinators for improved validation and error reporting
 description:         Based on the article
                      <https://ro-che.info/articles/2015-07-26-better-yaml-parsing Better Yaml Parsing>.

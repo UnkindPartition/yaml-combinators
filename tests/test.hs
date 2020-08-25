@@ -50,6 +50,9 @@ tests = testGroup "Data.Yaml.Combinators"
   , testCase "Expect an object, get an object with an extra field" $
       runParser (object $ field "foo" number) (Object [("foo", Number 1), ("bar", String "x")]) @?=
         Left (ParseError 1 $ UnexpectedAsPartOf (Object [("bar", String "x")]) (Object [("foo", Number 1), ("bar", String "x")]))
+  , testCase "Expect an object, get an object with an extra field, with extra fields allowed" $
+      runParser (objectE $ field "foo" number) (Object [("foo", Number 1), ("bar", String "x")]) @?=
+        Right 1
   , testCase "Expect an object, get a field that doesn't match" $
       runParser (object $ field "foo" number) (Object [("foo", String "hi")]) @?=
         Left (ParseError 1 $ ExpectedInsteadOf ["Number"] (String "hi"))

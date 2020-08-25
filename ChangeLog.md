@@ -1,5 +1,9 @@
 # Revision history for yaml-combinators
 
+## 1.1.2.0
+
+* add an `objectE` function accepting extra fields during the parsing of an object
+
 ## 1.1.1.2
 
 * Drop support for old GHCs

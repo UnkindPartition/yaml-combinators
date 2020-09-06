@@ -1,5 +1,9 @@
 # Revision history for yaml-combinators
 
+## 1.1.2
+
+* Add an `extraFields` combinator
+
 ## 1.1.1.2
 
 * Drop support for old GHCs

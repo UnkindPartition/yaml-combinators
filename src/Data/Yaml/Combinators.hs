@@ -4,7 +4,7 @@
 {-# LANGUAGE PolyKinds, DataKinds, KindSignatures,
              ExplicitForAll, TemplateHaskell, ViewPatterns,
              ScopedTypeVariables, TypeOperators, TypeFamilies,
-             GeneralizedNewtypeDeriving #-}
+             GeneralizedNewtypeDeriving, GADTs, LambdaCase #-}
 module Data.Yaml.Combinators
   ( Parser
   , parse
@@ -28,6 +28,8 @@ module Data.Yaml.Combinators
   , optField
   , defaultField
   , theField
+  , extraFields
+  -- * Arbitrary values
   , anyValue
   -- * Errors
   , ParseError(..)
@@ -45,19 +47,19 @@ import Data.Maybe
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as BS8
 import Data.Bifunctor (first)
+import Control.Monad
 import Control.Monad.Trans.Reader
 import Control.Monad.Trans.State as State
 import Data.Vector (Vector)
 import qualified Data.Vector as V
-import Data.Functor.Product
-import Data.Functor.Constant
-import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HM
 import Data.HashSet (HashSet)
 import qualified Data.HashSet as HS
 import Data.Ord
+import Data.Monoid
 import Generics.SOP
 import Generics.SOP.TH
+import Data.Yaml.Combinators.Free as Free
 
 -- $setup
 -- >>> :set -XOverloadedStrings -XTypeApplications
@@ -412,10 +414,15 @@ validate parser validator =
 --
 -- * Turn a 'FieldParser' into a 'Parser' with 'object'.
 newtype FieldParser a = FieldParser
-  (Product
-    (ReaderT Object Validation)
-    (Constant (HashMap Text ())) a)
+  (Free FieldParserBase a)
   deriving (Functor, Applicative)
+
+data FieldParserBase a where
+  OneField
+    :: Text -- ^ field name
+    -> ReaderT Object Validation a
+    -> FieldParserBase a
+  ExtraFields :: FieldParserBase Object
 
 -- | Require an object field with the given name and with a value matched by
 -- the given 'Parser'.
@@ -423,14 +430,12 @@ field
   :: Text -- ^ field name
   -> Parser a -- ^ value parser
   -> FieldParser a
-field name p = FieldParser $
-  Pair
-    (ReaderT $ \o ->
-      case HM.lookup name o of
-        Nothing -> Validation . Left $ ParseError 0 $ ExpectedAsPartOf (HS.singleton $ "field " ++ show name) $ Object o
-        Just v -> runParserV p v
-    )
-    (Constant $ HM.singleton name ())
+field name p = FieldParser . Free.lift . OneField name $
+  ReaderT $ \o ->
+    case HM.lookup name o of
+      Nothing -> Validation . Left $ ParseError 0 $ ExpectedAsPartOf (HS.singleton $ "field " ++ show name) $ Object o
+      Just v -> runParserV p v
+
 
 -- | Declare an optional object field with the given name and with a value
 -- matched by the given 'Parser'.
@@ -438,10 +443,8 @@ optField
   :: Text -- ^ field name
   -> Parser a -- ^ value parser
   -> FieldParser (Maybe a)
-optField name p = FieldParser $
-  Pair
-    (ReaderT $ \o -> traverse (runParserV p) $ HM.lookup name o)
-    (Constant $ HM.singleton name ())
+optField name p = FieldParser . Free.lift . OneField name $
+  ReaderT $ \o -> traverse (runParserV p) $ HM.lookup name o
 
 -- | Declare an optional object field with the given name and with a default
 -- to use if the field is absent.
@@ -472,6 +475,43 @@ theField
   -> FieldParser ()
 theField key value = field key (theString value)
 
+-- | This combinator does two things:
+--
+-- 1. Allow extra fields (not specified by 'field', 'theField' etc.) in the
+-- parsed object.
+-- 2. Return such extra fields as an 'Object'.
+--
+-- The return value can be of course ignored.
+--
+-- >>> let fp = field "name" string
+-- >>> either putStr print $ parse (object fp) "name: Anton"
+-- "Anton"
+-- >>> either putStr print $ parse (object fp) "{name: Anton, age: 2}"
+-- Unexpected
+-- <BLANKLINE>
+-- age: 2
+-- <BLANKLINE>
+-- as part of
+-- <BLANKLINE>
+-- age: 2
+-- name: Anton
+-- >>> either putStr print $ parse (object $ (,) <$> fp <*> extraFields) "{name: Anton, age: 2}"
+-- ("Anton",fromList [("age",Number 2.0)])
+-- >>> either putStr print $ parse (object $ fp <* extraFields) "{name: Anton, age: 2}"
+-- "Anton"
+--
+-- @since 1.1.2
+extraFields :: FieldParser Object
+extraFields = FieldParser . Free.lift $ ExtraFields
+
+data StrictPair a b = StrictPair !a !b
+
+instance (Semigroup a, Semigroup b) => Semigroup (StrictPair a b) where
+  StrictPair a1 b1 <> StrictPair a2 b2 = StrictPair (a1 <> a2) (b1 <> b2)
+
+instance (Monoid a, Monoid b) => Monoid (StrictPair a b) where
+  mempty = StrictPair mempty mempty
+
 -- | Match an object. Which set of keys to expect and how their values
 -- should be parsed is determined by the 'FieldParser'.
 --
@@ -480,16 +520,45 @@ theField key value = field key (theString value)
 -- Right ("Anton",Just 2)
 -- >>> parse p "name: Roma"
 -- Right ("Roma",Nothing)
+--
+-- By default, this function will fail when there are unrecognized fields
+-- in the object. See 'extraFields' for a way to capture or ignore them.
 object :: FieldParser a -> Parser a
-object (FieldParser (Pair (ReaderT parseFn) (Constant names))) = fromComponent $ Z $ ParserComponent $ Just $ const $ \(I o :* Nil) ->
+object (FieldParser fp) = fromComponent $ Z $ ParserComponent $ Just $ const $ \(I o :* Nil) ->
   incErrLevel $
-    parseFn o <*
-    (case HM.keys (HM.difference o names) of
-      [] -> pure ()
-      name : _ ->
-        let v = o HM.! name
-        in Validation . Left $ ParseError 0 $ UnexpectedAsPartOf (Object (HM.singleton name v)) (Object o)
-    )
+    let
+      -- Do a first run over the free FieldParser applicative to collect
+      -- some metainformation: which fields are requested by the parser,
+      -- and whether extra fields are requested too (and therefore allowed)
+      StrictPair requested_names (Any requested_extra_fields) = Free.foldMap (\case
+        OneField name _ -> StrictPair (HM.singleton name ()) (Any False)
+        ExtraFields -> StrictPair mempty (Any True)
+        ) fp
+      extra_fields = HM.difference o requested_names
+      extra_fields_error =
+        when (not requested_extra_fields && not (HM.null extra_fields)) $
+          Validation . Left $ ParseError 0 $
+            UnexpectedAsPartOf (Object extra_fields) (Object o)
+    in
+      Free.run (\case
+        OneField _ p -> runReaderT p o
+        ExtraFields -> pure extra_fields
+        ) fp
+        -- See Note [Extra fields error]
+        <* extra_fields_error
+
+{- Note [Extra fields error]
+   ~~~~~~~~~~~~~~~~~~~~~~~~~
+   We could have written
+
+     if not requested_extra_fields && not (HM.null extra_fields)
+        then Validation . Left $  ...
+        else ...
+
+   However, we intentionally try to run the applicative parser even when
+   there are extra fields, because some of the resulting validation errors
+   may be more severe/interesting than the "extra fields" error.
+-}
 
 -- | Match any JSON value and return it as Aeson's 'Value'.
 --

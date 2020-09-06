@@ -419,7 +419,7 @@ newtype FieldParser a = FieldParser
 
 data FieldParserBase a where
   OneField
-    :: Text -- ^ field name
+    :: Text -- field name
     -> ReaderT Object Validation a
     -> FieldParserBase a
   ExtraFields :: FieldParserBase Object

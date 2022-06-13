@@ -28,10 +28,11 @@ library
   exposed-modules:
     Data.Yaml.Combinators
   other-modules:
+    Data.Yaml.Combinators.AesonCompat
     Data.Yaml.Combinators.Free
   -- other-extensions:
   build-depends:
-    aeson,
+    aeson < 2.1,
     base >= 4.11 && < 5,
     bytestring,
     generics-sop >= 0.5,

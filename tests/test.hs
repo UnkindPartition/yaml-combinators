@@ -6,7 +6,6 @@ import Test.Tasty.HUnit
 import Data.Aeson hiding (object)
 import qualified Data.Text as T
 import Data.Monoid
-import qualified Data.HashMap.Strict as HM
 
 main = defaultMain tests
 
@@ -27,7 +26,7 @@ tests = testGroup "Data.Yaml.Combinators"
       runParser (array string) (Array [String "hi"]) @?=
         Right ["hi"]
   , testCase "Expect an array, get an object" $
-      runParser (array string) (Object HM.empty) @?=
+      runParser (array string) (Object mempty) @?=
         Left (ParseError 0 $ ExpectedInsteadOf ["Array"] (Object []))
   , testCase "Expect an array of Strings, get an array of Numbers" $
       runParser (array string) (Array [Number 3]) @?=

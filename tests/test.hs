@@ -1,12 +1,12 @@
-{-# LANGUAGE OverloadedLists, OverloadedStrings #-}
+{-# LANGUAGE OverloadedLists, OverloadedStrings, TypeApplications #-}
 import Data.Yaml.Combinators
 import Data.Functor
 import Test.Tasty
 import Test.Tasty.HUnit
 import Data.Aeson hiding (object)
+import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.Text as T
 import Data.Monoid
-import qualified Data.HashMap.Strict as HM
 
 main = defaultMain tests
 
@@ -27,7 +27,7 @@ tests = testGroup "Data.Yaml.Combinators"
       runParser (array string) (Array [String "hi"]) @?=
         Right ["hi"]
   , testCase "Expect an array, get an object" $
-      runParser (array string) (Object HM.empty) @?=
+      runParser (array string) (Object mempty) @?=
         Left (ParseError 0 $ ExpectedInsteadOf ["Array"] (Object []))
   , testCase "Expect an array of Strings, get an array of Numbers" $
       runParser (array string) (Array [Number 3]) @?=
@@ -151,4 +151,34 @@ tests = testGroup "Data.Yaml.Combinators"
       runParser (even_str <> even_str) (String "x")
       @?=
       Left (ParseError 1 (ExpectedInsteadOf ["even-length string"] (String "x")))
+  -- These used to be proper doctests, but now they are just haddocks, because doctest is janky
+  , testCase "doctests" $ do
+      parse string "howdy" @?= Right "howdy"
+      parse (theString "hello") "hello" @?= Right ()
+      parse (theString "hello") "bye" @?= Left "Expected \"hello\" instead of:\n\nbye\n"
+      parse (array string) "[a,b,c]" @?= Right ["a","b","c"]
+      parse (theArray $ (,) <$> element string <*> element bool) "[f, true]" @?= Right ("f",True)
+      parse number "3.14159" @?= Right 3.14159
+      parse (integer @Int) "2017" @?= Right 2017
+      parse bool "yes" @?= Right True
+      parse null_ "null" @?= Right ()
+      let acceptEven n = if even n then Right n else Left "an even number"
+      parse (integer @Int `validate` acceptEven) "2017"
+        @?= Left "Expected an even number instead of:\n\n2017\n"
+      let p = object (Right <$ theField "type" "number" <*> field "value" number)
+                <> object (Left  <$ theField "type" "string" <*> field "value" string)
+      parse p "{type: string, value: abc}" @?= Right (Left "abc")
+      parse p "{type: number, value: 123}" @?= Right (Right 123.0)
+      let fp = field "name" string
+      parse (object fp) "name: Anton" @?= Right "Anton"
+      parse (object fp) "{name: Anton, age: 2}"
+        @?= Left "Unexpected \n\nage: 2\n\nas part of\n\nage: 2\nname: Anton\n"
+      parse (object $ (,) <$> fp <*> extraFields) "{name: Anton, age: 2}"
+        @?= Right ("Anton", KeyMap.fromList [("age", Number 2.0)])
+      parse (object $ fp <* extraFields) "{name: Anton, age: 2}" @?= Right "Anton"
+      let p = object $ (,) <$> field "name" string <*> optField "age" (integer @Int)
+      parse p "{ name: Anton, age: 2 }" @?= Right ("Anton", Just 2)
+      parse p "name: Roma" @?= Right ("Roma", Nothing)
+      parse anyValue "[one, two, {three: four}]"
+        @?= Right (Array [String "one", String "two", Object (KeyMap.fromList [("three", String "four")])])
   ]

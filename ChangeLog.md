@@ -1,5 +1,9 @@
 # Revision history for yaml-combinators
 
+## 1.1.2.1
+
+* Require `aeson ^>= 2.0`
+
 ## 1.1.2
 
 * Add an `extraFields` combinator

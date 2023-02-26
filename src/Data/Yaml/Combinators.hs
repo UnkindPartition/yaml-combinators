@@ -40,7 +40,9 @@ module Data.Yaml.Combinators
 
 import Data.Scientific
 import Data.Yaml (decodeEither', encode)
-import Data.Yaml.Combinators.AesonCompat (Array, Object, Value(..), objDifference, objLookup, objNull, objSingleton)
+import Data.Aeson (Array, Object, Value (..))
+import qualified Data.Aeson.Key as Key
+import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Text (Text)
 import Data.List
 import Data.Maybe
@@ -59,10 +61,6 @@ import Data.Monoid
 import Generics.SOP
 import Generics.SOP.TH
 import Data.Yaml.Combinators.Free as Free
-
--- $setup
--- >>> :set -XOverloadedStrings -XTypeApplications
--- >>> import Data.Semigroup
 
 -- orphan Value instances
 deriveGeneric ''Value
@@ -431,7 +429,7 @@ field
   -> FieldParser a
 field name p = FieldParser . Free.lift . OneField name $
   ReaderT $ \o ->
-    case objLookup name o of
+    case KeyMap.lookup (Key.fromText name) o of
       Nothing -> Validation . Left $ ParseError 0 $ ExpectedAsPartOf (HS.singleton $ "field " ++ show name) $ Object o
       Just v -> runParserV p v
 
@@ -443,7 +441,7 @@ optField
   -> Parser a -- ^ value parser
   -> FieldParser (Maybe a)
 optField name p = FieldParser . Free.lift . OneField name $
-  ReaderT $ \o -> traverse (runParserV p) $ objLookup name o
+  ReaderT $ \o -> traverse (runParserV p) $ KeyMap.lookup (Key.fromText name) o
 
 -- | Declare an optional object field with the given name and with a default
 -- to use if the field is absent.
@@ -530,12 +528,12 @@ object (FieldParser fp) = fromComponent $ Z $ ParserComponent $ Just $ const $ \
       -- some metainformation: which fields are requested by the parser,
       -- and whether extra fields are requested too (and therefore allowed)
       StrictPair requested_names (Any requested_extra_fields) = Free.foldMap (\case
-        OneField name _ -> StrictPair (objSingleton name ()) (Any False)
+        OneField name _ -> StrictPair (KeyMap.singleton (Key.fromText name) ()) (Any False)
         ExtraFields -> StrictPair mempty (Any True)
         ) fp
-      extra_fields = objDifference o requested_names
+      extra_fields = KeyMap.difference o requested_names
       extra_fields_error =
-        when (not requested_extra_fields && not (objNull extra_fields)) $
+        when (not requested_extra_fields && not (KeyMap.null extra_fields)) $
           Validation . Left $ ParseError 0 $
             UnexpectedAsPartOf (Object extra_fields) (Object o)
     in

@@ -2,7 +2,7 @@
 -- documentation, see http://haskell.org/cabal/users-guide/
 
 name:                yaml-combinators
-version:             1.1.2
+version:             1.1.2.1
 synopsis:            YAML parsing combinators for improved validation and error reporting
 description:         Based on the article
                      <https://ro-che.info/articles/2015-07-26-better-yaml-parsing Better Yaml Parsing>.
@@ -10,13 +10,13 @@ homepage:            https://github.com/feuerbach/yaml-combinators
 license:             MIT
 license-file:        LICENSE
 author:              Roman Cheplyaka
-maintainer:          roma@ro-che.info
+maintainer:          roma@ro-che.info, mitchellwrosen@gmail.com
 copyright:           (c) 2015 Signal Vine, LLC
                      (c) 2017 Roman Cheplyaka
 category:            Text
 build-type:          Simple
 extra-source-files:  ChangeLog.md, README.md
-cabal-version:       >=1.10
+cabal-version:       2.0
 
 source-repository head
   type:     git
@@ -28,11 +28,10 @@ library
   exposed-modules:
     Data.Yaml.Combinators
   other-modules:
-    Data.Yaml.Combinators.AesonCompat
     Data.Yaml.Combinators.Free
   -- other-extensions:
   build-depends:
-    aeson < 2.1,
+    aeson ^>= 2.0,
     base >= 4.11 && < 5,
     bytestring,
     generics-sop >= 0.5,
@@ -62,14 +61,3 @@ test-suite test
     , text
     , unordered-containers
     , yaml-combinators
-
-test-suite doctests
-  type:          exitcode-stdio-1.0
-  ghc-options:   -threaded
-  hs-source-dirs:
-    tests
-  main-is:
-    doctests.hs
-  build-depends: base, doctest
-  default-language:
-    Haskell2010
